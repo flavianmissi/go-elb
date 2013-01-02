@@ -1,9 +1,9 @@
 package elb_test
 
 import (
-	"launchpad.net/goamz/aws"
-	"github.com/flaviamissi/go-elb"
-	"github.com/flaviamissi/go-elb/elbtest"
+	"github.com/flaviamissi/go-elb/aws"
+	"github.com/flaviamissi/go-elb/elb"
+	"github.com/flaviamissi/go-elb/elb/elbtest"
 	. "launchpad.net/gocheck"
 )
 

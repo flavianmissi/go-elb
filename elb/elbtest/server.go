@@ -6,7 +6,7 @@ package elbtest
 import (
     "fmt"
     "encoding/xml"
-	"launchpad.net/goamz/elb"
+	"github.com/flaviamissi/go-elb/elb"
 	"net"
     "net/http"
 	"sync"

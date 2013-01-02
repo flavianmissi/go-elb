@@ -1,7 +1,7 @@
 package elb
 
 import (
-	"launchpad.net/goamz/aws"
+	"github.com/flaviamissi/go-elb/aws"
 )
 
 func Sign(auth aws.Auth, method, path string, params map[string]string, host string) {

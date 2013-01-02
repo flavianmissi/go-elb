@@ -4,7 +4,7 @@ package elb
 import (
 	"encoding/xml"
 	"fmt"
-	"launchpad.net/goamz/aws"
+	"github.com/flaviamissi/go-elb/aws"
 	"net/http"
 	"net/url"
 	"strconv"
