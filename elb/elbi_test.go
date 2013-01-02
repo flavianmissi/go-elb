@@ -3,7 +3,7 @@ package elb_test
 import (
 	"flag"
 	"github.com/flaviamissi/go-elb/aws"
-	"launchpad.net/goamz/ec2"
+	"github.com/flaviamissi/go-elb/ec2"
 	"github.com/flaviamissi/go-elb/elb"
 	. "launchpad.net/gocheck"
 )
