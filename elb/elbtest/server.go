@@ -4,11 +4,14 @@
 package elbtest
 
 import (
-    "fmt"
-    "encoding/xml"
+	"encoding/xml"
+	"fmt"
 	"github.com/flaviamissi/go-elb/elb"
 	"net"
-    "net/http"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -18,9 +21,10 @@ type Server struct {
 	listener  net.Listener
 	mutex     sync.Mutex
 	reqId     int
-    lbs       []string
-    instances []string
-    instCount int
+	lbs       []string
+	lbsReqs   map[string]url.Values
+	instances []string
+	instCount int
 }
 
 // Starts and returns a new server
@@ -32,6 +36,7 @@ func NewServer() (*Server, error) {
 	srv := &Server{
 		listener: l,
 		url:      "http://" + l.Addr().String(),
+		lbsReqs:  map[string]url.Values{},
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		srv.serveHTTP(w, req)
@@ -74,146 +79,237 @@ func (srv *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			Message:    "Unrecognized Action",
 		})
 	}
-    reqId := fmt.Sprintf("req%0X", srv.reqId)
-    srv.reqId++
-    if resp, err := f(srv, w, req, reqId); err == nil {
-        if err := xml.NewEncoder(w).Encode(resp); err != nil {
-            panic(err)
-        }
-    } else {
-        switch err.(type) {
-        case *elb.Error:
-            srv.error(w, err.(*elb.Error))
-        default:
-            panic(err)
-        }
-    }
+	reqId := fmt.Sprintf("req%0X", srv.reqId)
+	srv.reqId++
+	if resp, err := f(srv, w, req, reqId); err == nil {
+		if err := xml.NewEncoder(w).Encode(resp); err != nil {
+			panic(err)
+		}
+	} else {
+		switch err.(type) {
+		case *elb.Error:
+			srv.error(w, err.(*elb.Error))
+		default:
+			panic(err)
+		}
+	}
 }
 
 func (srv *Server) createLoadBalancer(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
-    composition := map[string]string{
-        "AvailabilityZones.member.1": "Subnets.member.1",
-    }
-    if err := srv.validateComposition(req, composition); err != nil {
-        return nil, err
-    }
-    required := []string{
-        "Listeners.member.1.InstancePort",
-        "Listeners.member.1.InstanceProtocol",
-        "Listeners.member.1.Protocol",
-        "Listeners.member.1.LoadBalancerPort",
-        "LoadBalancerName",
-    }
-    if err := srv.validate(req, required); err != nil {
-        return nil, err
-    }
+	composition := map[string]string{
+		"AvailabilityZones.member.1": "Subnets.member.1",
+	}
+	if err := srv.validateComposition(req, composition); err != nil {
+		return nil, err
+	}
+	required := []string{
+		"Listeners.member.1.InstancePort",
+		"Listeners.member.1.InstanceProtocol",
+		"Listeners.member.1.Protocol",
+		"Listeners.member.1.LoadBalancerPort",
+		"LoadBalancerName",
+	}
+	if err := srv.validate(req, required); err != nil {
+		return nil, err
+	}
 	path := req.FormValue("Path")
 	if path == "" {
 		path = "/"
 	}
-    srv.lbs = append(srv.lbs, req.FormValue("LoadBalancerName"))
-    return elb.CreateLoadBalancerResp{
-        DNSName: fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", req.FormValue("LoadBalancerName")),
-    }, nil
+	lbName := req.FormValue("LoadBalancerName")
+	srv.lbsReqs[lbName] = req.Form
+	// maybe it should be removed, since the createLB field already has the LBs names
+	srv.lbs = append(srv.lbs, lbName)
+	return elb.CreateLoadBalancerResp{
+		DNSName: fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName),
+	}, nil
 }
 
 func (srv *Server) deleteLoadBalancer(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
-    if err := srv.validate(req, []string{"LoadBalancerName"}); err != nil {
-        return nil, err
-    }
-    for i, lb := range srv.lbs {
-        if lb == req.FormValue("LoadBalancerName") {
-            srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
-            break
-        }
-    }
-    return elb.SimpleResp{RequestId: reqId}, nil
+	if err := srv.validate(req, []string{"LoadBalancerName"}); err != nil {
+		return nil, err
+	}
+	for i, lb := range srv.lbs {
+		if lb == req.FormValue("LoadBalancerName") {
+			srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
+			break
+		}
+	}
+	return elb.SimpleResp{RequestId: reqId}, nil
 }
 
 func (srv *Server) registerInstancesWithLoadBalancer(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
-    required := []string{"LoadBalancerName", "Instances.member.1.InstanceId"}
-    if err := srv.validate(req, required); err != nil {
-        return nil, err
-    }
-    if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
-        return nil, err
-    }
-    instIds := []string{}
-    i := 1
-    instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
-    for instId != "" {
-        if err := srv.instanceExists(instId); err != nil {
-            return nil, err
-        }
-        instIds = append(instIds, instId)
-        i++
-        instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
-    }
-    return elb.RegisterInstancesResp{InstanceIds: instIds}, nil
+	required := []string{"LoadBalancerName", "Instances.member.1.InstanceId"}
+	if err := srv.validate(req, required); err != nil {
+		return nil, err
+	}
+	if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
+		return nil, err
+	}
+	instIds := []string{}
+	i := 1
+	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	for instId != "" {
+		if err := srv.instanceExists(instId); err != nil {
+			return nil, err
+		}
+		instIds = append(instIds, instId)
+		i++
+		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	}
+	return elb.RegisterInstancesResp{InstanceIds: instIds}, nil
 }
 
 func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
-    required := []string{"LoadBalancerName", "Instances.member.1.InstanceId"}
-    if err := srv.validate(req, required); err != nil {
-        return nil, err
-    }
-    if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
-        return nil, err
-    }
-    i := 1
-    instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
-    for instId != "" {
-        if err := srv.instanceExists(instId); err != nil {
-            return nil, err
-        }
-        i++
-        instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
-    }
-    return elb.SimpleResp{RequestId: reqId}, nil
+	required := []string{"LoadBalancerName"}
+	if err := srv.validate(req, required); err != nil {
+		return nil, err
+	}
+	if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
+		return nil, err
+	}
+	i := 1
+	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	for instId != "" {
+		if err := srv.instanceExists(instId); err != nil {
+			return nil, err
+		}
+		i++
+		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	}
+	return elb.SimpleResp{RequestId: reqId}, nil
+}
+
+func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
+	i := 1
+	lbName := req.FormValue(fmt.Sprintf("LoadBalancerNames.member.%d", i))
+	for lbName != "" {
+		key := fmt.Sprintf("LoadBalancerNames.member.%d", i)
+		if req.FormValue(key) != "" {
+			if err := srv.lbExists(req.FormValue(key)); err != nil {
+				return nil, err
+			}
+		}
+		i++
+		lbName = fmt.Sprintf("LoadBalancerNames.member.%d", i)
+	}
+	var resp elb.DescribeLoadBalancerResp
+	for name, value := range srv.lbsReqs {
+		ht := 10
+		timeout := 5
+		ut := 2
+		interval := 30
+		target := "TCP:80"
+		if v := value.Get("HealthCheck.HealthyThreshold"); v != "" {
+			ht, _ = strconv.Atoi(v)
+		}
+		if v := value.Get("HealthCheck.Timeout"); v != "" {
+			timeout, _ = strconv.Atoi(v)
+		}
+		if v := value.Get("HealthCheck.UnhealthyThreshold"); v != "" {
+			ut, _ = strconv.Atoi(v)
+		}
+		if v := value.Get("HealthCheck.Interval"); v != "" {
+			interval, _ = strconv.Atoi(v)
+		}
+		if v := value.Get("HealthCheck.Target"); v != "" {
+			target = v
+		}
+		hc := elb.HealthCheck{
+			HealthyThreshold:   ht,
+			Interval:           interval,
+			Target:             target,
+			Timeout:            timeout,
+			UnhealthyThreshold: ut,
+		}
+		lds := []elb.ListenerDescription{}
+		i := 1
+		protocol := value.Get(fmt.Sprintf("Listeners.member.%d.Protocol", i))
+		for protocol != "" {
+			key := fmt.Sprintf("Listeners.member.%d.", i)
+			lInstPort, _ := strconv.Atoi(value.Get(key + "InstancePort"))
+			lLBPort, _ := strconv.Atoi(value.Get(key + "LoadBalancerPort"))
+			lDescription := elb.ListenerDescription{
+				Listener: elb.Listener{
+					Protocol:         strings.ToUpper(protocol),
+					InstanceProtocol: strings.ToUpper(value.Get(key + "InstanceProtocol")),
+					LoadBalancerPort: lLBPort,
+					InstancePort:     lInstPort,
+				},
+			}
+			i++
+			protocol = value.Get(fmt.Sprintf("Listeners.member.%d.Protocol", i))
+			lds = append(lds, lDescription)
+		}
+		ssgGName := "amazon-elb-sg"
+		ssgOAlias := "amazon-elb"
+		if v := value.Get("SourceSecurityGroup.GroupName"); v != "" {
+			ssgGName = v
+		}
+		if v := value.Get("SourceSecurityGroup.OwnerAlias"); v != "" {
+			ssgOAlias = v
+		}
+		lbDesc := elb.LoadBalancerDescription{
+			AvailZones:           []string{value.Get("AvailabilityZones.member.1")},
+			LoadBalancerName:     name,
+			HealthCheck:          hc,
+			ListenerDescriptions: lds,
+			SourceSecurityGroup: elb.SourceSecurityGroup{
+				GroupName:  ssgGName,
+				OwnerAlias: ssgOAlias,
+			},
+		}
+		if value.Get("Scheme") == "" {
+			lbDesc.Scheme = "internet-facing"
+		}
+		lbDesc.LoadBalancerName = value.Get("LoadBalancerName")
+		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, lbDesc)
+	}
+	return resp, nil
 }
 
 func (srv *Server) instanceExists(id string) error {
-    for _, instId := range srv.instances {
-        if instId == id {
-            return nil
-        }
-    }
-    return &elb.Error{
-        StatusCode: 400,
-        Code:       "InvalidInstance",
-        Message:    fmt.Sprintf("InvalidInstance found in [%s]. Invalid id: \"%s\"", id, id),
-    }
+	for _, instId := range srv.instances {
+		if instId == id {
+			return nil
+		}
+	}
+	return &elb.Error{
+		StatusCode: 400,
+		Code:       "InvalidInstance",
+		Message:    fmt.Sprintf("InvalidInstance found in [%s]. Invalid id: \"%s\"", id, id),
+	}
 }
 
 func (srv *Server) lbExists(name string) error {
-    index := -1
-    for i, lb := range srv.lbs {
-        if lb == name {
-            index = i
-            break
-        }
-    }
-    if index < 0 {
-        return &elb.Error{
-            StatusCode: 400,
-            Code:       "LoadBalancerNotFound",
-            Message:    fmt.Sprintf("There is no ACTIVE Load Balancer named '%s'", name),
-        }
-    }
-    return nil
+	index := -1
+	for i, lb := range srv.lbs {
+		if lb == name {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return &elb.Error{
+			StatusCode: 400,
+			Code:       "LoadBalancerNotFound",
+			Message:    fmt.Sprintf("There is no ACTIVE Load Balancer named '%s'", name),
+		}
+	}
+	return nil
 }
 
 func (srv *Server) validate(req *http.Request, required []string) error {
-    for _, field := range required {
-        if req.FormValue(field) == "" {
+	for _, field := range required {
+		if req.FormValue(field) == "" {
 			return &elb.Error{
 				StatusCode: 400,
 				Code:       "ValidationError",
 				Message:    fmt.Sprintf("%s is required.", field),
 			}
-        }
-    }
-    return nil
+		}
+	}
+	return nil
 }
 
 // Validates the composition of the fields.
@@ -226,56 +322,56 @@ func (srv *Server) validate(req *http.Request, required []string) error {
 //
 // The server also requires that at least one of those fields are specified.
 func (srv *Server) validateComposition(req *http.Request, composition map[string]string) error {
-    for k, v := range composition {
-        if req.FormValue(k) != "" && req.FormValue(v) != "" {
+	for k, v := range composition {
+		if req.FormValue(k) != "" && req.FormValue(v) != "" {
 			return &elb.Error{
 				StatusCode: 400,
 				Code:       "ValidationError",
 				Message:    fmt.Sprintf("Only one of %s or %s may be specified", k, v),
 			}
-        }
-        if req.FormValue(k) == "" && req.FormValue(v) == "" {
+		}
+		if req.FormValue(k) == "" && req.FormValue(v) == "" {
 			return &elb.Error{
 				StatusCode: 400,
 				Code:       "ValidationError",
 				Message:    fmt.Sprintf("Either %s or %s must be specified", k, v),
 			}
-        }
-    }
-    return nil
+		}
+	}
+	return nil
 }
 
 // Creates a fake instance in the server
 func (srv *Server) NewInstance() string {
-    srv.instCount++
-    instId := fmt.Sprintf("i-%d", srv.instCount)
-    srv.instances = append(srv.instances, instId)
-    return instId
+	srv.instCount++
+	instId := fmt.Sprintf("i-%d", srv.instCount)
+	srv.instances = append(srv.instances, instId)
+	return instId
 }
 
 // Removes a fake instance from the server
 //
 // If no instance is found it does nothing
 func (srv *Server) RemoveInstance(instId string) {
-    for i, id := range srv.instances {
-        if id == instId {
-            srv.instances[i], srv.instances = srv.instances[len(srv.instances)-1], srv.instances[:len(srv.instances)-1]
-        }
-    }
+	for i, id := range srv.instances {
+		if id == instId {
+			srv.instances[i], srv.instances = srv.instances[len(srv.instances)-1], srv.instances[:len(srv.instances)-1]
+		}
+	}
 }
 
 // Creates a fake load balancer in the fake server
 func (srv *Server) NewLoadBalancer(name string) {
-    srv.lbs = append(srv.lbs, name)
+	srv.lbs = append(srv.lbs, name)
 }
 
 // Removes a fake load balancer from the fake server
 func (srv *Server) RemoveLoadBalancer(name string) {
-    for i, lb := range srv.lbs {
-        if lb == name {
-            srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
-        }
-    }
+	for i, lb := range srv.lbs {
+		if lb == name {
+			srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
+		}
+	}
 }
 
 var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, string) (interface{}, error){
@@ -283,4 +379,5 @@ var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, strin
 	"DeleteLoadBalancer":                  (*Server).deleteLoadBalancer,
 	"RegisterInstancesWithLoadBalancer":   (*Server).registerInstancesWithLoadBalancer,
 	"DeregisterInstancesFromLoadBalancer": (*Server).deregisterInstancesFromLoadBalancer,
+	"DescribeLoadBalancers":               (*Server).describeLoadBalancers,
 }

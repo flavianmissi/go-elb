@@ -49,43 +49,44 @@ func (s *AmazonClientSuite) SetUpSuite(c *C) {
 }
 
 func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *C) {
-    createLBReq := elb.CreateLoadBalancer{
-        Name:       "testLB",
-        AvailZones: []string{"us-east-1a"},
-        Listeners:  []elb.Listener{
-            {
-                InstancePort:     80,
-                InstanceProtocol: "http",
-                LoadBalancerPort: 80,
-                Protocol:         "http",
-            },
-        },
-    }
-    resp, err := s.elb.CreateLoadBalancer(&createLBReq)
-    c.Assert(err, IsNil)
-    c.Assert(resp.DNSName, Not(Equals), "")
-    deleteResp, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-    c.Assert(err, IsNil)
-    c.Assert(deleteResp.RequestId, Not(Equals), "")
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	resp, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer s.elb.DeleteLoadBalancer(createLBReq.Name)
+	c.Assert(resp.DNSName, Not(Equals), "")
+	deleteResp, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+	c.Assert(err, IsNil)
+	c.Assert(deleteResp.RequestId, Not(Equals), "")
 }
 
 func (s *ClientTests) TestCreateLoadBalancerError(c *C) {
-    createLBReq := elb.CreateLoadBalancer{
-        Name:       "testLB",
-        AvailZones: []string{"us-east-1a"},
-        Subnets:    []string{"subnetid-1"},
-        Listeners:  []elb.Listener{
-            {
-                InstancePort:     80,
-                InstanceProtocol: "http",
-                LoadBalancerPort: 80,
-                Protocol:         "http",
-            },
-        },
-    }
-    resp, err := s.elb.CreateLoadBalancer(&createLBReq)
-    c.Assert(resp, IsNil)
-    c.Assert(err, NotNil)
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Subnets:    []string{"subnetid-1"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	resp, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
 	e, ok := err.(*elb.Error)
 	c.Assert(ok, Equals, true)
 	c.Assert(e.Message, Matches, "Only one of .* or .* may be specified")
@@ -93,7 +94,7 @@ func (s *ClientTests) TestCreateLoadBalancerError(c *C) {
 }
 
 // Cost: 0.02 USD
-func (s *ClientTests) TestCreateAndRegisterAndDeregisterInstanceWithLoadBalancer(c *C) {
+func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c *C) {
 	options := ec2.RunInstances{
 		ImageId:      "ami-ccf405a5",
 		InstanceType: "t1.micro",
@@ -101,31 +102,89 @@ func (s *ClientTests) TestCreateAndRegisterAndDeregisterInstanceWithLoadBalancer
 	resp1, err := s.ec2.RunInstances(&options)
 	c.Assert(err, IsNil)
 	instId := resp1.Instances[0].InstanceId
-    createLBReq := elb.CreateLoadBalancer{
-        Name:       "testLB",
-        AvailZones: []string{"us-east-1a"},
-        Listeners:  []elb.Listener{
-            {
-                InstancePort:     80,
-                InstanceProtocol: "http",
-                LoadBalancerPort: 80,
-                Protocol:         "http",
-            },
-        },
-    }
-    _, err = s.elb.CreateLoadBalancer(&createLBReq)
-    c.Assert(err, IsNil)
-    defer func () {
-        _, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-        c.Check(err, IsNil)
-        _, err = s.ec2.TerminateInstances([]string{instId})
-        c.Check(err, IsNil)
-    }()
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	_, err = s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+		_, err = s.ec2.TerminateInstances([]string{instId})
+		c.Check(err, IsNil)
+	}()
 
-    resp, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
-    c.Assert(err, IsNil)
-    c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
-    resp2, err := s.elb.DeregisterInstancesFromLoadBalancer([]string{instId}, createLBReq.Name)
-    c.Assert(err, IsNil)
-    c.Assert(resp2, Not(Equals), "")
+	resp, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
+	c.Assert(err, IsNil)
+	c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
+	resp2, err := s.elb.DeregisterInstancesFromLoadBalancer([]string{instId}, createLBReq.Name)
+	c.Assert(err, IsNil)
+	c.Assert(resp2, Not(Equals), "")
+}
+
+func (s *ClientTests) TestDescribeLoadBalancers(c *C) {
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	_, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+	}()
+	resp, err := s.elb.DescribeLoadBalancers()
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.LoadBalancerDescriptions) > 0, Equals, true)
+	c.Assert(resp.LoadBalancerDescriptions[0].AvailZones, DeepEquals, []string{"us-east-1a"})
+	c.Assert(resp.LoadBalancerDescriptions[0].LoadBalancerName, Equals, "testlb")
+	c.Assert(resp.LoadBalancerDescriptions[0].Scheme, Equals, "internet-facing")
+	hc := elb.HealthCheck{
+		HealthyThreshold:   10,
+		Interval:           30,
+		Target:             "TCP:80",
+		Timeout:            5,
+		UnhealthyThreshold: 2,
+	}
+	c.Assert(resp.LoadBalancerDescriptions[0].HealthCheck, DeepEquals, hc)
+	ld := []elb.ListenerDescription{
+		{
+			Listener: elb.Listener{
+				Protocol:         "HTTP",
+				LoadBalancerPort: 80,
+				InstanceProtocol: "HTTP",
+				InstancePort:     80,
+			},
+		},
+	}
+	c.Assert(resp.LoadBalancerDescriptions[0].ListenerDescriptions, DeepEquals, ld)
+	ssg := elb.SourceSecurityGroup{
+		GroupName:  "amazon-elb-sg",
+		OwnerAlias: "amazon-elb",
+	}
+	c.Assert(resp.LoadBalancerDescriptions[0].SourceSecurityGroup, DeepEquals, ssg)
+}
+
+func (s *ClientTests) TestDescribeLoadBalancersBadRequest(c *C) {
+	resp, err := s.elb.DescribeLoadBalancers("absentlb")
+	c.Assert(err, NotNil)
+	c.Assert(resp, IsNil)
+	c.Assert(err, ErrorMatches, ".*(LoadBalancerNotFound).*")
 }

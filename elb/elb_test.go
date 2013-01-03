@@ -4,6 +4,7 @@ import (
 	"github.com/flaviamissi/go-elb/aws"
 	"github.com/flaviamissi/go-elb/elb"
 	. "launchpad.net/gocheck"
+	"time"
 )
 
 type S struct {
@@ -22,7 +23,7 @@ func (s *S) SetUpSuite(c *C) {
 func (s *S) TestCreateLoadBalancer(c *C) {
 	testServer.PrepareResponse(200, nil, CreateLoadBalancer)
 	createLB := &elb.CreateLoadBalancer{
-		Name:       "testLB",
+		Name:       "testlb",
 		AvailZones: []string{"us-east-1a", "us-east-1b"},
 		Listeners: []elb.Listener{
 			{
@@ -35,11 +36,12 @@ func (s *S) TestCreateLoadBalancer(c *C) {
 	}
 	resp, err := s.elb.CreateLoadBalancer(createLB)
 	c.Assert(err, IsNil)
+	defer s.elb.DeleteLoadBalancer(createLB.Name)
 	values := testServer.WaitRequest().URL.Query()
 	c.Assert(values.Get("Version"), Equals, "2012-06-01")
 	c.Assert(values.Get("Action"), Equals, "CreateLoadBalancer")
 	c.Assert(values.Get("Timestamp"), Not(Equals), "")
-	c.Assert(values.Get("LoadBalancerName"), Equals, "testLB")
+	c.Assert(values.Get("LoadBalancerName"), Equals, "testlb")
 	c.Assert(values.Get("AvailabilityZones.member.1"), Equals, "us-east-1a")
 	c.Assert(values.Get("AvailabilityZones.member.2"), Equals, "us-east-1b")
 	c.Assert(values.Get("Listeners.member.1.InstancePort"), Equals, "80")
@@ -53,7 +55,7 @@ func (s *S) TestCreateLoadBalancer(c *C) {
 func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *C) {
 	testServer.PrepareResponse(200, nil, CreateLoadBalancer)
 	createLB := &elb.CreateLoadBalancer{
-		Name:      "testLB",
+		Name: "testlb",
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -68,10 +70,11 @@ func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *C) {
 				LoadBalancerPort: 8080,
 			},
 		},
-        Subnets:   []string{"subnetid-1", "subnetid-2"},
+		Subnets: []string{"subnetid-1", "subnetid-2"},
 	}
 	_, err := s.elb.CreateLoadBalancer(createLB)
 	c.Assert(err, IsNil)
+	defer s.elb.DeleteLoadBalancer(createLB.Name)
 	values := testServer.WaitRequest().URL.Query()
 	c.Assert(values.Get("Listeners.member.1.InstancePort"), Equals, "80")
 	c.Assert(values.Get("Listeners.member.1.LoadBalancerPort"), Equals, "80")
@@ -84,7 +87,7 @@ func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *C) {
 func (s *S) TestCreateLoadBalancerWithWrongParamsCombination(c *C) {
 	testServer.PrepareResponse(400, nil, CreateLoadBalancerBadRequest)
 	createLB := &elb.CreateLoadBalancer{
-		Name:       "testLB",
+		Name:       "testlb",
 		AvailZones: []string{"us-east-1a", "us-east-1b"},
 		Listeners: []elb.Listener{
 			{
@@ -162,10 +165,81 @@ func (s *S) TestDeregisterInstancesFromLoadBalancer(c *C) {
 func (s *S) TestDeregisterInstancesFromLoadBalancerBadRequest(c *C) {
 	testServer.PrepareResponse(400, nil, DeregisterInstancesFromLoadBalancerBadRequest)
 	resp, err := s.elb.DeregisterInstancesFromLoadBalancer([]string{"i-b44db8ca", "i-461ecf38"}, "testlb")
-    c.Assert(resp, IsNil)
-    c.Assert(err, NotNil)
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
 	e, ok := err.(*elb.Error)
 	c.Assert(ok, Equals, true)
 	c.Assert(e.Message, Equals, "There is no ACTIVE Load Balancer named 'absentlb'")
 	c.Assert(e.Code, Equals, "LoadBalancerNotFound")
+}
+
+func (s *S) TestDescribeLoadBalancers(c *C) {
+	testServer.PrepareResponse(200, nil, DescribeLoadBalancers)
+	resp, err := s.elb.DescribeLoadBalancers()
+	c.Assert(err, IsNil)
+	values := testServer.WaitRequest().URL.Query()
+	c.Assert(values.Get("Version"), Equals, "2012-06-01")
+	c.Assert(values.Get("Signature"), Not(Equals), "")
+	c.Assert(values.Get("Timestamp"), Not(Equals), "")
+	c.Assert(values.Get("Action"), Equals, "DescribeLoadBalancers")
+	t, _ := time.Parse(time.RFC3339, "2012-12-27T11:51:52.970Z")
+	expected := &elb.DescribeLoadBalancerResp{
+		[]elb.LoadBalancerDescription{
+			{
+				AvailZones:                []string{"us-east-1a"},
+				BackendServerDescriptions: []elb.BackendServerDescriptions(nil),
+				CanonicalHostedZoneName:   "testlb-2087227216.us-east-1.elb.amazonaws.com",
+				CanonicalHostedZoneNameId: "Z3DZXE0Q79N41H",
+				CreatedTime:               t,
+				DNSName:                   "testlb-2087227216.us-east-1.elb.amazonaws.com",
+				HealthCheck: elb.HealthCheck{
+					HealthyThreshold:   10,
+					Interval:           30,
+					Target:             "TCP:80",
+					Timeout:            5,
+					UnhealthyThreshold: 2,
+				},
+				Instances: []elb.Instance(nil),
+				ListenerDescriptions: []elb.ListenerDescription{
+					{
+						Listener: elb.Listener{
+							Protocol:         "HTTP",
+							LoadBalancerPort: 80,
+							InstanceProtocol: "HTTP",
+							InstancePort:     80,
+						},
+					},
+				},
+				LoadBalancerName: "testlb",
+				//Policies:                  elb.Policies(nil),
+				Scheme:         "internet-facing",
+				SecurityGroups: []string(nil),
+				SourceSecurityGroup: elb.SourceSecurityGroup{
+					GroupName:  "amazon-elb-sg",
+					OwnerAlias: "amazon-elb",
+				},
+				Subnets: []string(nil),
+			},
+		},
+	}
+	c.Assert(resp, DeepEquals, expected)
+}
+
+func (s *S) TestDescribeLoadBalancersByName(c *C) {
+	testServer.PrepareResponse(200, nil, DescribeLoadBalancers)
+	s.elb.DescribeLoadBalancers("somelb")
+	values := testServer.WaitRequest().URL.Query()
+	c.Assert(values.Get("Version"), Equals, "2012-06-01")
+	c.Assert(values.Get("Signature"), Not(Equals), "")
+	c.Assert(values.Get("Timestamp"), Not(Equals), "")
+	c.Assert(values.Get("Action"), Equals, "DescribeLoadBalancers")
+	c.Assert(values.Get("LoadBalancerNames.member.1"), Equals, "somelb")
+}
+
+func (s *S) TestDescribeLoadBalancersBadRequest(c *C) {
+	testServer.PrepareResponse(400, nil, DescribeLoadBalancersBadRequest)
+	resp, err := s.elb.DescribeLoadBalancers()
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, `^Cannot find Load Balancer absentlb \(LoadBalancerNotFound\)$`)
 }

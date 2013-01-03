@@ -81,3 +81,68 @@ var DeregisterInstancesFromLoadBalancerBadRequest = `
     <RequestId>498e2b4a-4aa1-11e2-8839-d19a879f2eec</RequestId>
 </ErrorResponse>
 `
+
+var DescribeLoadBalancers = `
+<DescribeLoadBalancersResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <DescribeLoadBalancersResult>
+        <LoadBalancerDescriptions>
+            <member>
+                <SecurityGroups/>
+                <CreatedTime>2012-12-27T11:51:52.970Z</CreatedTime>
+                <LoadBalancerName>testlb</LoadBalancerName>
+                <HealthCheck>
+                    <Interval>30</Interval>
+                    <Target>TCP:80</Target>
+                    <HealthyThreshold>10</HealthyThreshold>
+                    <Timeout>5</Timeout>
+                    <UnhealthyThreshold>2</UnhealthyThreshold>
+                </HealthCheck>
+                <ListenerDescriptions>
+                    <member>
+                        <PolicyNames/>
+                        <Listener>
+                            <Protocol>HTTP</Protocol>
+                            <LoadBalancerPort>80</LoadBalancerPort>
+                            <InstanceProtocol>HTTP</InstanceProtocol>
+                            <InstancePort>80</InstancePort>
+                        </Listener>
+                    </member>
+                </ListenerDescriptions>
+                <Instances/>
+                <Policies>
+                    <AppCookieStickinessPolicies/>
+                    <OtherPolicies/>
+                    <LBCookieStickinessPolicies/>
+                </Policies>
+                <AvailabilityZones>
+                    <member>us-east-1a</member>
+                </AvailabilityZones>
+                <CanonicalHostedZoneName>testlb-2087227216.us-east-1.elb.amazonaws.com</CanonicalHostedZoneName>
+                <CanonicalHostedZoneNameID>Z3DZXE0Q79N41H</CanonicalHostedZoneNameID>
+                <Scheme>internet-facing</Scheme>
+                <SourceSecurityGroup>
+                    <OwnerAlias>amazon-elb</OwnerAlias>
+                    <GroupName>amazon-elb-sg</GroupName>
+                </SourceSecurityGroup>
+                <DNSName>testlb-2087227216.us-east-1.elb.amazonaws.com</DNSName>
+                <BackendServerDescriptions/>
+                <Subnets/>
+            </member>
+        </LoadBalancerDescriptions>
+    </DescribeLoadBalancersResult>
+    <ResponseMetadata>
+    <RequestId>e2e81963-5055-11e2-99c7-434205631d9b</RequestId>
+    </ResponseMetadata>
+</DescribeLoadBalancersResponse>
+`
+
+var DescribeLoadBalancersBadRequest = `
+<ErrorResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <Error>
+        <Type>Sender</Type>
+        <Code>LoadBalancerNotFound</Code>
+        <Message>Cannot find Load Balancer absentlb</Message>
+    </Error>
+    <RequestId>f14f348e-50f7-11e2-9831-f770dd71c209</RequestId>
+</ErrorResponse>
+`

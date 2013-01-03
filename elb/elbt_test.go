@@ -66,72 +66,79 @@ func (s *LocalServerSuite) SetUpSuite(c *C) {
 	s.clientTests.elb = elb.New(s.srv.auth, s.srv.region)
 }
 
-
 func (s *LocalServerSuite) TestCreateLoadBalancer(c *C) {
-    s.clientTests.TestCreateAndDeleteLoadBalancer(c)
+	s.clientTests.TestCreateAndDeleteLoadBalancer(c)
 }
 
 func (s *LocalServerSuite) TestCreateLoadBalancerError(c *C) {
-    s.clientTests.TestCreateLoadBalancerError(c)
+	s.clientTests.TestCreateLoadBalancerError(c)
+}
+
+func (s *LocalServerSuite) TestDescribeLoadBalancer(c *C) {
+	s.clientTests.TestDescribeLoadBalancers(c)
+}
+
+func (s *LocalServerSuite) TestDescribeLoadBalancersBadRequest(c *C) {
+	s.clientTests.TestDescribeLoadBalancersBadRequest(c)
 }
 
 func (s *LocalServerSuite) TestRegisterInstanceWithLoadBalancer(c *C) {
-    srv := s.srv.srv
-    instId := srv.NewInstance()
-    defer srv.RemoveInstance(instId)
-    srv.NewLoadBalancer("testlb")
-    defer srv.RemoveLoadBalancer("testlb")
-    resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{instId}, "testlb")
-    c.Assert(err, IsNil)
-    c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
+	srv := s.srv.srv
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{instId}, "testlb")
+	c.Assert(err, IsNil)
+	c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
 
 }
 
 func (s *LocalServerSuite) TestRegisterInstanceWithLoadBalancerWithAbsentInstance(c *C) {
-    srv := s.srv.srv
-    srv.NewLoadBalancer("testlb")
-    defer srv.RemoveLoadBalancer("testlb")
-    resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{"i-212"}, "testlb")
-    c.Assert(err, NotNil)
-    c.Assert(err, ErrorMatches, `^InvalidInstance found in \[i-212\]. Invalid id: "i-212" \(InvalidInstance\)$`)
-    c.Assert(resp, IsNil)
+	srv := s.srv.srv
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{"i-212"}, "testlb")
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, `^InvalidInstance found in \[i-212\]. Invalid id: "i-212" \(InvalidInstance\)$`)
+	c.Assert(resp, IsNil)
 }
 
 func (s *LocalServerSuite) TestRegisterInstanceWithLoadBalancerWithAbsentLoadBalancer(c *C) {
-    // the verification if the lb exists is done before the instances, so there is no need to create
-    // fixture instances for this test, it'll never get that far
-    resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{"i-212"}, "absentlb")
-    c.Assert(err, NotNil)
-    c.Assert(err, ErrorMatches, `^There is no ACTIVE Load Balancer named 'absentlb' \(LoadBalancerNotFound\)$`)
-    c.Assert(resp, IsNil)
+	// the verification if the lb exists is done before the instances, so there is no need to create
+	// fixture instances for this test, it'll never get that far
+	resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{"i-212"}, "absentlb")
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, `^There is no ACTIVE Load Balancer named 'absentlb' \(LoadBalancerNotFound\)$`)
+	c.Assert(resp, IsNil)
 }
 
 func (s *LocalServerSuite) TestDeregisterInstanceWithLoadBalancer(c *C) {
-    // there is no need to register the instance first, amazon returns the same response
-    // in both cases (instance registered or not)
-    srv := s.srv.srv
-    instId := srv.NewInstance()
-    defer srv.RemoveInstance(instId)
-    srv.NewLoadBalancer("testlb")
-    defer srv.RemoveLoadBalancer("testlb")
-    resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{instId}, "testlb")
-    c.Assert(err, IsNil)
-    c.Assert(resp.RequestId, Not(Equals), "")
+	// there is no need to register the instance first, amazon returns the same response
+	// in both cases (instance registered or not)
+	srv := s.srv.srv
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{instId}, "testlb")
+	c.Assert(err, IsNil)
+	c.Assert(resp.RequestId, Not(Equals), "")
 }
 
 func (s *LocalServerSuite) TestDeregisterInstanceWithLoadBalancerWithAbsentLoadBalancer(c *C) {
-    resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{"i-212"}, "absentlb")
-    c.Assert(resp, IsNil)
-    c.Assert(err, NotNil)
-    c.Assert(err, ErrorMatches, `^There is no ACTIVE Load Balancer named 'absentlb' \(LoadBalancerNotFound\)$`)
+	resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{"i-212"}, "absentlb")
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, `^There is no ACTIVE Load Balancer named 'absentlb' \(LoadBalancerNotFound\)$`)
 }
 
 func (s *LocalServerSuite) TestDeregisterInstancewithLoadBalancerWithAbsentInstance(c *C) {
-    srv := s.srv.srv
-    srv.NewLoadBalancer("testlb")
-    defer srv.RemoveLoadBalancer("testlb")
-    resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{"i-212"}, "testlb")
-    c.Assert(resp, IsNil)
-    c.Assert(err, NotNil)
-    c.Assert(err, ErrorMatches, `^InvalidInstance found in \[i-212\]. Invalid id: "i-212" \(InvalidInstance\)$`)
+	srv := s.srv.srv
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	resp, err := s.clientTests.elb.DeregisterInstancesFromLoadBalancer([]string{"i-212"}, "testlb")
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, `^InvalidInstance found in \[i-212\]. Invalid id: "i-212" \(InvalidInstance\)$`)
 }

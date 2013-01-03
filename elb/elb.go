@@ -124,6 +124,90 @@ func (elb *ELB) DeregisterInstancesFromLoadBalancer(instanceIds []string, lbName
 	return resp, nil
 }
 
+type DescribeLoadBalancerResp struct {
+	LoadBalancerDescriptions []LoadBalancerDescription `xml:"DescribeLoadBalancersResult>LoadBalancerDescriptions>member"`
+}
+
+type LoadBalancerDescription struct {
+	AvailZones                []string                    `xml:"AvailabilityZones>member"`
+	BackendServerDescriptions []BackendServerDescriptions `xml:"BackendServerDescriptions>member"`
+	CanonicalHostedZoneName   string                      `xml:"CanonicalHostedZoneName"`
+	CanonicalHostedZoneNameId string                      `xml:"CanonicalHostedZoneNameID"`
+	CreatedTime               time.Time                   `xml:"CreatedTime"`
+	DNSName                   string                      `xml:"DNSName"`
+	HealthCheck               HealthCheck                 `xml:"HealthCheck"`
+	Instances                 []Instance                  `xml:"Instances>member"`
+	ListenerDescriptions      []ListenerDescription       `xml:"ListenerDescriptions>member"`
+	LoadBalancerName          string                      `xml:"LoadBalancerName"`
+	Policies                  Policies                    `xml:"Policies"`
+	Scheme                    string                      `xml:"Scheme"`
+	SecurityGroups            []string                    `xml:"SecurityGroups>member"` //vpc only
+	SourceSecurityGroup       SourceSecurityGroup         `xml:"SourceSecurityGroup"`
+	Subnets                   []string                    `xml:"Subnets>member"`
+	VPCId                     string                      `xml:"VPCId"`
+}
+
+// Describe Load Balancers.
+// It can be used to describe all Load Balancers or specific ones.
+//
+// See http://goo.gl/wofJA for more details.
+func (elb *ELB) DescribeLoadBalancers(names ...string) (*DescribeLoadBalancerResp, error) {
+	params := map[string]string{"Action": "DescribeLoadBalancers"}
+	for i, name := range names {
+		index := fmt.Sprintf("LoadBalancerNames.member.%d", i+1)
+		params[index] = name
+	}
+	resp := new(DescribeLoadBalancerResp)
+	if err := elb.query(params, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+type BackendServerDescriptions struct {
+	InstancePort int      `xml:"InstancePort"`
+	PolicyNames  []string `xml:"PolicyNames>member"`
+}
+
+type HealthCheck struct {
+	HealthyThreshold   int    `xml:"HealthyThreshold"`
+	Interval           int    `xml:"Interval"`
+	Target             string `xml:"Target"`
+	Timeout            int    `xml:"Timeout"`
+	UnhealthyThreshold int    `xml:"UnhealthyThreshold"`
+}
+
+type Instance struct {
+	InstanceId string `xml:"InstanceId"`
+}
+
+type ListenerDescription struct {
+	Listener    Listener `xml:"Listener"`
+	PolicyNames []string `xml:"PolicyNames>member"`
+}
+
+type Policies struct {
+	AppCookieStickinessPolicies []AppCookieStickinessPolicies `xml:"AppCookieStickinessPolicies>member"`
+	LBCookieStickinessPolicies  []LBCookieStickinessPolicies  `xml:"LBCookieStickinessPolicies>member"`
+	OtherPolicies               []string                      `xml:"OtherPolicies>member"`
+}
+
+// see http://goo.gl/clXGV for more information.
+type AppCookieStickinessPolicies struct {
+	CookieName string `xml:"CookieName"`
+	PolicyName string `xml:"PolicyName"`
+}
+
+type LBCookieStickinessPolicies struct {
+	CookieExpirationPeriod int    `xml:"CookieExpirationPeriod"`
+	PolicyName             string `xml:"PolicyName"`
+}
+
+type SourceSecurityGroup struct {
+	GroupName  string `xml:"GroupName"`
+	OwnerAlias string `xml:"OwnerAlias"`
+}
+
 func (elb *ELB) query(params map[string]string, resp interface{}) error {
 	params["Version"] = "2012-06-01"
 	params["Timestamp"] = time.Now().In(time.UTC).Format(time.RFC3339)
@@ -200,9 +284,9 @@ func makeCreateParams(createLB *CreateLoadBalancer) map[string]string {
 	if createLB.Scheme != "" {
 		params["Scheme"] = createLB.Scheme
 	}
-    for i, s := range createLB.Subnets {
-		key := fmt.Sprintf("Subnets.member.%d", i + 1)
-        params[key] = s
+	for i, s := range createLB.Subnets {
+		key := fmt.Sprintf("Subnets.member.%d", i+1)
+		params[key] = s
 	}
 	for i, l := range createLB.Listeners {
 		key := "Listeners.member.%d.%s"
@@ -213,7 +297,7 @@ func makeCreateParams(createLB *CreateLoadBalancer) map[string]string {
 		params[fmt.Sprintf(key, index, "LoadBalancerPort")] = strconv.Itoa(l.LoadBalancerPort)
 	}
 	for i, az := range createLB.AvailZones {
-		key := fmt.Sprintf("AvailabilityZones.member.%d", i + 1)
+		key := fmt.Sprintf("AvailabilityZones.member.%d", i+1)
 		params[key] = az
 	}
 	return params
