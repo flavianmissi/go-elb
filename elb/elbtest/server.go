@@ -21,7 +21,7 @@ type Server struct {
 	listener  net.Listener
 	mutex     sync.Mutex
 	reqId     int
-	lbs       []string
+	lbs       map[string]string
 	lbsReqs   map[string]url.Values
 	instances []string
 	instCount int
@@ -37,6 +37,7 @@ func NewServer() (*Server, error) {
 		listener: l,
 		url:      "http://" + l.Addr().String(),
 		lbsReqs:  map[string]url.Values{},
+		lbs:      make(map[string]string),
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		srv.serveHTTP(w, req)
@@ -119,9 +120,9 @@ func (srv *Server) createLoadBalancer(w http.ResponseWriter, req *http.Request, 
 	lbName := req.FormValue("LoadBalancerName")
 	srv.lbsReqs[lbName] = req.Form
 	// maybe it should be removed, since the createLB field already has the LBs names
-	srv.lbs = append(srv.lbs, lbName)
+	srv.lbs[lbName] = fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName)
 	return elb.CreateLoadBalancerResp{
-		DNSName: fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName),
+		DNSName: srv.lbs[lbName],
 	}, nil
 }
 
@@ -129,12 +130,7 @@ func (srv *Server) deleteLoadBalancer(w http.ResponseWriter, req *http.Request, 
 	if err := srv.validate(req, []string{"LoadBalancerName"}); err != nil {
 		return nil, err
 	}
-	for i, lb := range srv.lbs {
-		if lb == req.FormValue("LoadBalancerName") {
-			srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
-			break
-		}
-	}
+	srv.RemoveLoadBalancer(req.FormValue("LoadBalancerName"))
 	return elb.SimpleResp{RequestId: reqId}, nil
 }
 
@@ -191,7 +187,7 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 			}
 		}
 		i++
-		lbName = fmt.Sprintf("LoadBalancerNames.member.%d", i)
+		lbName = req.FormValue(fmt.Sprintf("LoadBalancerNames.member.%d", i))
 	}
 	var resp elb.DescribeLoadBalancerResp
 	for name, value := range srv.lbsReqs {
@@ -263,6 +259,7 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 			lbDesc.Scheme = "internet-facing"
 		}
 		lbDesc.LoadBalancerName = value.Get("LoadBalancerName")
+		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName]
 		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, lbDesc)
 	}
 	return resp, nil
@@ -282,14 +279,7 @@ func (srv *Server) instanceExists(id string) error {
 }
 
 func (srv *Server) lbExists(name string) error {
-	index := -1
-	for i, lb := range srv.lbs {
-		if lb == name {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
+	if _, ok := srv.lbs[name]; !ok {
 		return &elb.Error{
 			StatusCode: 400,
 			Code:       "LoadBalancerNotFound",
@@ -362,16 +352,12 @@ func (srv *Server) RemoveInstance(instId string) {
 
 // Creates a fake load balancer in the fake server
 func (srv *Server) NewLoadBalancer(name string) {
-	srv.lbs = append(srv.lbs, name)
+	srv.lbs[name] = fmt.Sprintf("%s-some-aws-stuff.sa-east-1.amazonaws.com", name)
 }
 
 // Removes a fake load balancer from the fake server
 func (srv *Server) RemoveLoadBalancer(name string) {
-	for i, lb := range srv.lbs {
-		if lb == name {
-			srv.lbs[i], srv.lbs = srv.lbs[len(srv.lbs)-1], srv.lbs[:len(srv.lbs)-1]
-		}
-	}
+	delete(srv.lbs, name)
 }
 
 var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, string) (interface{}, error){
