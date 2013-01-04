@@ -17,7 +17,7 @@ func sign(auth aws.Auth, method, path string, params map[string]string, host str
 	params["SignatureMethod"] = "HmacSHA256"
 
 	var keys, sarray []string
-	for k, _ := range params {
+	for k := range params {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
