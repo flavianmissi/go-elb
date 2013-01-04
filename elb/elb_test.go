@@ -70,7 +70,8 @@ func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *C) {
 				LoadBalancerPort: 8080,
 			},
 		},
-		Subnets: []string{"subnetid-1", "subnetid-2"},
+		Subnets:        []string{"subnetid-1", "subnetid-2"},
+		SecurityGroups: []string{"sg-1", "sg-2"},
 	}
 	_, err := s.elb.CreateLoadBalancer(createLB)
 	c.Assert(err, IsNil)
@@ -82,6 +83,8 @@ func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *C) {
 	c.Assert(values.Get("Listeners.member.2.LoadBalancerPort"), Equals, "8080")
 	c.Assert(values.Get("Subnets.member.1"), Equals, "subnetid-1")
 	c.Assert(values.Get("Subnets.member.2"), Equals, "subnetid-2")
+	c.Assert(values.Get("SecurityGroups.member.1"), Equals, "sg-1")
+	c.Assert(values.Get("SecurityGroups.member.2"), Equals, "sg-2")
 }
 
 func (s *S) TestCreateLoadBalancerWithWrongParamsCombination(c *C) {

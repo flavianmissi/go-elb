@@ -320,6 +320,10 @@ func makeCreateParams(createLB *CreateLoadBalancer) map[string]string {
 	if createLB.Scheme != "" {
 		params["Scheme"] = createLB.Scheme
 	}
+	for i, s := range createLB.SecurityGroups {
+		key := fmt.Sprintf("SecurityGroups.member.%d", i+1)
+		params[key] = s
+	}
 	for i, s := range createLB.Subnets {
 		key := fmt.Sprintf("Subnets.member.%d", i+1)
 		params[key] = s
