@@ -20,6 +20,24 @@ type lb struct {
 	instances []string
 }
 
+func (l *lb) addInstance(id string) {
+	l.instances = append(l.instances, id)
+}
+
+func (l *lb) removeInstance(id string) {
+	index := -1
+	for i, instance := range l.instances {
+		if instance == id {
+			index = i
+			break
+		}
+	}
+	if index > -1 {
+		copy(l.instances[index:], l.instances[index+1:])
+		l.instances = l.instances[:len(l.instances)-1]
+	}
+}
+
 // Server implements an ELB simulator for use in testing.
 type Server struct {
 	url       string
@@ -150,19 +168,18 @@ func (srv *Server) registerInstancesWithLoadBalancer(w http.ResponseWriter, req 
 	}
 	instIds := []string{}
 	i := 1
-	lbName := req.FormValue("LoadBalancerName")
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	lb := srv.lbs[req.FormValue("LoadBalancerName")]
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
 			return nil, err
 		}
 		instIds = append(instIds, instId)
-		lb := srv.lbs[lbName]
-		lb.instances = append(lb.instances, instId)
-		srv.lbs[lbName] = lb
+		lb.addInstance(instId)
 		i++
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
+	srv.lbs[req.FormValue("LoadBalancerName")] = lb
 	return elb.RegisterInstancesResp{InstanceIds: instIds}, nil
 }
 
@@ -175,14 +192,17 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 		return nil, err
 	}
 	i := 1
+	lb := srv.lbs[req.FormValue("LoadBalancerName")]
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
 			return nil, err
 		}
 		i++
+		lb.removeInstance(instId)
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
+	srv.lbs[req.FormValue("LoadBalancerName")] = lb
 	return elb.SimpleResp{RequestId: reqId}, nil
 }
 
