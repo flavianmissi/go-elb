@@ -383,6 +383,7 @@ func (srv *Server) NewLoadBalancer(name string) {
 // Removes a fake load balancer from the fake server
 func (srv *Server) RemoveLoadBalancer(name string) {
 	delete(srv.lbs, name)
+	delete(srv.lbsReqs, name)
 }
 
 var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, string) (interface{}, error){
