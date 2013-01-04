@@ -15,13 +15,18 @@ import (
 	"sync"
 )
 
+type lb struct {
+	dnsName   string
+	instances []string
+}
+
 // Server implements an ELB simulator for use in testing.
 type Server struct {
 	url       string
 	listener  net.Listener
 	mutex     sync.Mutex
 	reqId     int
-	lbs       map[string]string
+	lbs       map[string]lb
 	lbsReqs   map[string]url.Values
 	instances []string
 	instCount int
@@ -37,7 +42,7 @@ func NewServer() (*Server, error) {
 		listener: l,
 		url:      "http://" + l.Addr().String(),
 		lbsReqs:  map[string]url.Values{},
-		lbs:      make(map[string]string),
+		lbs:      make(map[string]lb),
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		srv.serveHTTP(w, req)
@@ -119,9 +124,11 @@ func (srv *Server) createLoadBalancer(w http.ResponseWriter, req *http.Request, 
 	}
 	lbName := req.FormValue("LoadBalancerName")
 	srv.lbsReqs[lbName] = req.Form
-	srv.lbs[lbName] = fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName)
+	srv.lbs[lbName] = lb{
+		dnsName: fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName),
+	}
 	return elb.CreateLoadBalancerResp{
-		DNSName: srv.lbs[lbName],
+		DNSName: srv.lbs[lbName].dnsName,
 	}, nil
 }
 
@@ -143,12 +150,16 @@ func (srv *Server) registerInstancesWithLoadBalancer(w http.ResponseWriter, req 
 	}
 	instIds := []string{}
 	i := 1
+	lbName := req.FormValue("LoadBalancerName")
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
 			return nil, err
 		}
 		instIds = append(instIds, instId)
+		lb := srv.lbs[lbName]
+		lb.instances = append(lb.instances, instId)
+		srv.lbs[lbName] = lb
 		i++
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
@@ -279,7 +290,16 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 			lbDesc.Scheme = "internet-facing"
 		}
 		lbDesc.LoadBalancerName = value.Get("LoadBalancerName")
-		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName]
+		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName].dnsName
+		if l := len(srv.lbs[lbDesc.LoadBalancerName].instances); l > 0 {
+			lbDesc.Instances = make([]elb.Instance, l)
+			lb := srv.lbs[lbDesc.LoadBalancerName]
+			for i := 0; i < l; i++ {
+				lbDesc.Instances[i] = elb.Instance{
+					InstanceId: lb.instances[i],
+				}
+			}
+		}
 		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, lbDesc)
 	}
 	return resp, nil
@@ -398,7 +418,9 @@ func (srv *Server) RemoveInstance(instId string) {
 
 // Creates a fake load balancer in the fake server
 func (srv *Server) NewLoadBalancer(name string) {
-	srv.lbs[name] = fmt.Sprintf("%s-some-aws-stuff.sa-east-1.amazonaws.com", name)
+	srv.lbs[name] = lb{
+		dnsName: fmt.Sprintf("%s-some-aws-stuff.sa-east-1.amazonaws.com", name),
+	}
 }
 
 // Removes a fake load balancer from the fake server
