@@ -175,6 +175,24 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 	return elb.SimpleResp{RequestId: reqId}, nil
 }
 
+// getParameters returns the value all parameters from a request that matches a
+// prefix.
+//
+// For example, for the prefix "Subnets.member.", it will return a slice
+// containing the value of keys "Subnets.member.1", "Subnets.member.2" ...
+// "Subnets.member.N". The prefix must include the trailing dot.
+func (srv *Server) getParameters(prefix string, values url.Values) []string {
+	i, key := 1, ""
+	var k = func(n int) string {
+		return fmt.Sprintf(prefix+"%d", n)
+	}
+	var result []string
+	for i, key = 2, k(i); values.Get(key) != ""; i, key = i+1, k(i) {
+		result = append(result, values.Get(key))
+	}
+	return result
+}
+
 func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
 	i := 1
 	lbName := req.FormValue(fmt.Sprintf("LoadBalancerNames.member.%d", i))
@@ -245,16 +263,19 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 			ssgOAlias = v
 		}
 		lbDesc := elb.LoadBalancerDescription{
-			AvailZones:           []string{value.Get("AvailabilityZones.member.1")},
+			AvailZones:           srv.getParameters("AvailabilityZones.member.", value),
+			Subnets:              srv.getParameters("Subnets.member.", value),
+			SecurityGroups:       srv.getParameters("SecurityGroups.member.", value),
 			LoadBalancerName:     name,
 			HealthCheck:          hc,
 			ListenerDescriptions: lds,
+			Scheme:               value.Get("Scheme"),
 			SourceSecurityGroup: elb.SourceSecurityGroup{
 				GroupName:  ssgGName,
 				OwnerAlias: ssgOAlias,
 			},
 		}
-		if value.Get("Scheme") == "" {
+		if lbDesc.Scheme == "" {
 			lbDesc.Scheme = "internet-facing"
 		}
 		lbDesc.LoadBalancerName = value.Get("LoadBalancerName")
