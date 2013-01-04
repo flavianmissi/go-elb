@@ -119,7 +119,6 @@ func (srv *Server) createLoadBalancer(w http.ResponseWriter, req *http.Request, 
 	}
 	lbName := req.FormValue("LoadBalancerName")
 	srv.lbsReqs[lbName] = req.Form
-	// maybe it should be removed, since the createLB field already has the LBs names
 	srv.lbs[lbName] = fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName)
 	return elb.CreateLoadBalancerResp{
 		DNSName: srv.lbs[lbName],
@@ -265,6 +264,32 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 	return resp, nil
 }
 
+func (srv *Server) describeInstanceHealth(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
+	if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
+		return nil, err
+	}
+	resp := elb.DescribeInstanceHealthResp{
+		InstanceStates: []elb.InstanceState{},
+	}
+	i := 1
+	instanceId := req.FormValue("Instances.member.1.InstanceId")
+	for instanceId != "" {
+		if err := srv.instanceExists(instanceId); err != nil {
+			return nil, err
+		}
+		is := elb.InstanceState{
+			Description: "Instance is in pending state.",
+			InstanceId:  instanceId,
+			State:       "OutOfService",
+			ReasonCode:  "Instance",
+		}
+		resp.InstanceStates = append(resp.InstanceStates, is)
+		i++
+		instanceId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	}
+	return resp, nil
+}
+
 func (srv *Server) instanceExists(id string) error {
 	for _, instId := range srv.instances {
 		if instId == id {
@@ -366,4 +391,5 @@ var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, strin
 	"RegisterInstancesWithLoadBalancer":   (*Server).registerInstancesWithLoadBalancer,
 	"DeregisterInstancesFromLoadBalancer": (*Server).deregisterInstancesFromLoadBalancer,
 	"DescribeLoadBalancers":               (*Server).describeLoadBalancers,
+	"DescribeInstanceHealth":              (*Server).describeInstanceHealth,
 }

@@ -90,6 +90,7 @@ type RegisterInstancesResp struct {
 //
 // See http://goo.gl/x9hru for more details.
 func (elb *ELB) RegisterInstancesWithLoadBalancer(instanceIds []string, lbName string) (resp *RegisterInstancesResp, err error) {
+	// TODO: change params order and use ..., e.g (lbName string, instanceIds ...string)
 	params := map[string]string{
 		"Action":           "RegisterInstancesWithLoadBalancer",
 		"LoadBalancerName": lbName,
@@ -109,6 +110,7 @@ func (elb *ELB) RegisterInstancesWithLoadBalancer(instanceIds []string, lbName s
 //
 // See http://goo.gl/Hgo4U for more details.
 func (elb *ELB) DeregisterInstancesFromLoadBalancer(instanceIds []string, lbName string) (resp *SimpleResp, err error) {
+	// TODO: change params order and use ..., e.g (lbName string, instanceIds ...string)
 	params := map[string]string{
 		"Action":           "DeregisterInstancesFromLoadBalancer",
 		"LoadBalancerName": lbName,
@@ -206,6 +208,40 @@ type LBCookieStickinessPolicies struct {
 type SourceSecurityGroup struct {
 	GroupName  string `xml:"GroupName"`
 	OwnerAlias string `xml:"OwnerAlias"`
+}
+
+// Represents a XML response for DescribeInstanceHealth action
+//
+// See http://goo.gl/ovIB1 for more information.
+type DescribeInstanceHealthResp struct {
+	InstanceStates []InstanceState `xml:"DescribeInstanceHealthResult>InstanceStates>member"`
+}
+
+// See http://goo.gl/dzWfP for more information.
+type InstanceState struct {
+	Description string `xml:"Description"`
+	InstanceId  string `xml:"InstanceId"`
+	ReasonCode  string `xml:"ReasonCode"`
+	State       string `xml:"State"`
+}
+
+// Describe instance health.
+//
+// See http://goo.gl/ovIB1 for more information.
+func (elb *ELB) DescribeInstanceHealth(lbName string, instanceIds ...string) (*DescribeInstanceHealthResp, error) {
+	params := map[string]string{
+		"Action":           "DescribeInstanceHealth",
+		"LoadBalancerName": lbName,
+	}
+	for _, iId := range instanceIds {
+		key := fmt.Sprintf("Instances.member.1.InstanceId")
+		params[key] = iId
+	}
+	resp := new(DescribeInstanceHealthResp)
+	if err := elb.query(params, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (elb *ELB) query(params map[string]string, resp interface{}) error {

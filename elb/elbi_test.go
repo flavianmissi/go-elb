@@ -93,18 +93,18 @@ func (s *ClientTests) TestCreateLoadBalancerError(c *C) {
 	c.Assert(e.Code, Equals, "ValidationError")
 }
 
-// Cost: 0.02 USD
-func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c *C) {
+func (s *ClientTests) createInstanceAndLB(c *C) (*elb.CreateLoadBalancer, string) {
 	options := ec2.RunInstances{
 		ImageId:      "ami-ccf405a5",
 		InstanceType: "t1.micro",
+		AvailZone:    "us-east-1c",
 	}
 	resp1, err := s.ec2.RunInstances(&options)
 	c.Assert(err, IsNil)
 	instId := resp1.Instances[0].InstanceId
 	createLBReq := elb.CreateLoadBalancer{
 		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		AvailZones: []string{"us-east-1c"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -116,13 +116,18 @@ func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c 
 	}
 	_, err = s.elb.CreateLoadBalancer(&createLBReq)
 	c.Assert(err, IsNil)
+	return &createLBReq, instId
+}
+
+// Cost: 0.02 USD
+func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c *C) {
+	createLBReq, instId := s.createInstanceAndLB(c)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
 		c.Check(err, IsNil)
 		_, err = s.ec2.TerminateInstances([]string{instId})
 		c.Check(err, IsNil)
 	}()
-
 	resp, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
 	c.Assert(err, IsNil)
 	c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
@@ -187,4 +192,48 @@ func (s *ClientTests) TestDescribeLoadBalancersBadRequest(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(resp, IsNil)
 	c.Assert(err, ErrorMatches, ".*(LoadBalancerNotFound).*")
+}
+
+func (s *ClientTests) TestDescribeInstanceHealth(c *C) {
+	createLBReq, instId := s.createInstanceAndLB(c)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+		_, err = s.ec2.TerminateInstances([]string{instId})
+		c.Check(err, IsNil)
+	}()
+	_, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
+	c.Assert(err, IsNil)
+	resp, err := s.elb.DescribeInstanceHealth(createLBReq.Name, instId)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.InstanceStates) > 0, Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, Equals, "Instance is in pending state.")
+	c.Assert(resp.InstanceStates[0].InstanceId, Equals, instId)
+	c.Assert(resp.InstanceStates[0].State, Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "Instance")
+}
+
+func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *C) {
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	_, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+	}()
+	resp, err := s.elb.DescribeInstanceHealth(createLBReq.Name, "i-foo")
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, ".*i-foo.*(InvalidInstance).*")
 }

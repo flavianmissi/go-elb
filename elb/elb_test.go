@@ -243,3 +243,29 @@ func (s *S) TestDescribeLoadBalancersBadRequest(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err, ErrorMatches, `^Cannot find Load Balancer absentlb \(LoadBalancerNotFound\)$`)
 }
+
+func (s *S) TestDescribeInstanceHealth(c *C) {
+	testServer.PrepareResponse(200, nil, DescribeInstanceHealth)
+	resp, err := s.elb.DescribeInstanceHealth("testlb", "i-b44db8ca")
+	c.Assert(err, IsNil)
+	values := testServer.WaitRequest().URL.Query()
+	c.Assert(values.Get("Version"), Equals, "2012-06-01")
+	c.Assert(values.Get("Signature"), Not(Equals), "")
+	c.Assert(values.Get("Timestamp"), Not(Equals), "")
+	c.Assert(values.Get("Action"), Equals, "DescribeInstanceHealth")
+	c.Assert(values.Get("LoadBalancerName"), Equals, "testlb")
+	c.Assert(values.Get("Instances.member.1.InstanceId"), Equals, "i-b44db8ca")
+	c.Assert(len(resp.InstanceStates) > 0, Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, Equals, "Instance registration is still in progress.")
+	c.Assert(resp.InstanceStates[0].InstanceId, Equals, "i-b44db8ca")
+	c.Assert(resp.InstanceStates[0].State, Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "ELB")
+}
+
+func (s *S) TestDescribeInstanceHealthBadRequest(c *C) {
+	testServer.PrepareResponse(400, nil, DescribeInstanceHealthBadRequest)
+	resp, err := s.elb.DescribeInstanceHealth("testlb", "i-foooo")
+	c.Assert(err, NotNil)
+	c.Assert(resp, IsNil)
+	c.Assert(err, ErrorMatches, ".*i-foooo.*(InvalidInstance).*")
+}

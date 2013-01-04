@@ -91,7 +91,6 @@ func (s *LocalServerSuite) TestRegisterInstanceWithLoadBalancer(c *C) {
 	resp, err := s.clientTests.elb.RegisterInstancesWithLoadBalancer([]string{instId}, "testlb")
 	c.Assert(err, IsNil)
 	c.Assert(resp.InstanceIds, DeepEquals, []string{instId})
-
 }
 
 func (s *LocalServerSuite) TestRegisterInstanceWithLoadBalancerWithAbsentInstance(c *C) {
@@ -141,4 +140,23 @@ func (s *LocalServerSuite) TestDeregisterInstancewithLoadBalancerWithAbsentInsta
 	c.Assert(resp, IsNil)
 	c.Assert(err, NotNil)
 	c.Assert(err, ErrorMatches, `^InvalidInstance found in \[i-212\]. Invalid id: "i-212" \(InvalidInstance\)$`)
+}
+
+func (s *LocalServerSuite) TestDescribeInstanceHealth(c *C) {
+	srv := s.srv.srv
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	resp, err := s.clientTests.elb.DescribeInstanceHealth("testlb", instId)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.InstanceStates) > 0, Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, Equals, "Instance is in pending state.")
+	c.Assert(resp.InstanceStates[0].InstanceId, Equals, instId)
+	c.Assert(resp.InstanceStates[0].State, Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "Instance")
+}
+
+func (s *LocalServerSuite) TestDescribeInstanceHealthBadRequest(c *C) {
+	s.clientTests.TestDescribeInstanceHealthBadRequest(c)
 }

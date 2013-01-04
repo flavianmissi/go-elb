@@ -146,3 +146,32 @@ var DescribeLoadBalancersBadRequest = `
     <RequestId>f14f348e-50f7-11e2-9831-f770dd71c209</RequestId>
 </ErrorResponse>
 `
+
+var DescribeInstanceHealth = `
+<DescribeInstanceHealthResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <DescribeInstanceHealthResult>
+        <InstanceStates>
+            <member>
+                <Description>Instance registration is still in progress.</Description>
+                <InstanceId>i-b44db8ca</InstanceId>
+                <State>OutOfService</State>
+                <ReasonCode>ELB</ReasonCode>
+            </member>
+        </InstanceStates>
+    </DescribeInstanceHealthResult>
+    <ResponseMetadata>
+        <RequestId>da0d0f9e-5669-11e2-9f81-319facce7423</RequestId>
+    </ResponseMetadata>
+</DescribeInstanceHealthResponse>
+`
+
+var DescribeInstanceHealthBadRequest = `
+<ErrorResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <Error>
+        <Type>Sender</Type>
+        <Code>InvalidInstance</Code>
+        <Message>Could not find EC2 instance i-foooo.</Message>
+    </Error>
+    <RequestId>352e00d6-566c-11e2-a46d-313272bbb522</RequestId>
+</ErrorResponse>
+`
