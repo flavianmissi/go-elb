@@ -16,13 +16,36 @@ import (
 	"sync"
 )
 
+type lb struct {
+	dnsName   string
+	instances []string
+}
+
+func (l *lb) addInstance(id string) {
+	l.instances = append(l.instances, id)
+}
+
+func (l *lb) removeInstance(id string) {
+	index := -1
+	for i, instance := range l.instances {
+		if instance == id {
+			index = i
+			break
+		}
+	}
+	if index > -1 {
+		copy(l.instances[index:], l.instances[index+1:])
+		l.instances = l.instances[:len(l.instances)-1]
+	}
+}
+
 // Server implements an ELB simulator for use in testing.
 type Server struct {
 	url       string
 	listener  net.Listener
 	mutex     sync.Mutex
 	reqId     int
-	lbs       map[string]string
+	lbs       map[string]lb
 	lbsReqs   map[string]url.Values
 	instances []string
 	instCount int
@@ -38,7 +61,7 @@ func NewServer() (*Server, error) {
 		listener: l,
 		url:      "http://" + l.Addr().String(),
 		lbsReqs:  map[string]url.Values{},
-		lbs:      make(map[string]string),
+		lbs:      make(map[string]lb),
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		srv.serveHTTP(w, req)
@@ -120,9 +143,11 @@ func (srv *Server) createLoadBalancer(w http.ResponseWriter, req *http.Request, 
 	}
 	lbName := req.FormValue("LoadBalancerName")
 	srv.lbsReqs[lbName] = req.Form
-	srv.lbs[lbName] = fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName)
+	srv.lbs[lbName] = lb{
+		dnsName: fmt.Sprintf("%s-some-aws-stuff.us-east-1.elb.amazonaws.com", lbName),
+	}
 	return elb.CreateLoadBalancerResp{
-		DNSName: srv.lbs[lbName],
+		DNSName: srv.lbs[lbName].dnsName,
 	}, nil
 }
 
@@ -145,14 +170,17 @@ func (srv *Server) registerInstancesWithLoadBalancer(w http.ResponseWriter, req 
 	instIds := []string{}
 	i := 1
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
+	lb := srv.lbs[req.FormValue("LoadBalancerName")]
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
 			return nil, err
 		}
 		instIds = append(instIds, instId)
+		lb.addInstance(instId)
 		i++
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
+	srv.lbs[req.FormValue("LoadBalancerName")] = lb
 	return elb.RegisterInstancesResp{InstanceIds: instIds}, nil
 }
 
@@ -165,15 +193,36 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 		return nil, err
 	}
 	i := 1
+	lb := srv.lbs[req.FormValue("LoadBalancerName")]
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
 			return nil, err
 		}
 		i++
+		lb.removeInstance(instId)
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
+	srv.lbs[req.FormValue("LoadBalancerName")] = lb
 	return elb.SimpleResp{RequestId: reqId}, nil
+}
+
+// getParameters returns the value all parameters from a request that matches a
+// prefix.
+//
+// For example, for the prefix "Subnets.member.", it will return a slice
+// containing the value of keys "Subnets.member.1", "Subnets.member.2" ...
+// "Subnets.member.N". The prefix must include the trailing dot.
+func (srv *Server) getParameters(prefix string, values url.Values) []string {
+	i, key := 1, ""
+	var k = func(n int) string {
+		return fmt.Sprintf(prefix+"%d", n)
+	}
+	var result []string
+	for i, key = 2, k(i); values.Get(key) != ""; i, key = i+1, k(i) {
+		result = append(result, values.Get(key))
+	}
+	return result
 }
 
 func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
@@ -212,17 +261,29 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 		}
 		sourceSecGroup := srv.makeSourceSecGroup(&value)
 		lbDesc := elb.LoadBalancerDescription{
-			AvailZones:           []string{value.Get("AvailabilityZones.member.1")},
+			AvailZones:           srv.getParameters("AvailabilityZones.member.", value),
+			Subnets:              srv.getParameters("Subnets.member.", value),
+			SecurityGroups:       srv.getParameters("SecurityGroups.member.", value),
 			LoadBalancerName:     name,
 			HealthCheck:          srv.makeHealthCheck(&value),
 			ListenerDescriptions: lds,
+			Scheme:               value.Get("Scheme"),
 			SourceSecurityGroup:  sourceSecGroup,
 		}
-		if value.Get("Scheme") == "" {
+		if lbDesc.Scheme == "" {
 			lbDesc.Scheme = "internet-facing"
 		}
 		lbDesc.LoadBalancerName = value.Get("LoadBalancerName")
-		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName]
+		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName].dnsName
+		if l := len(srv.lbs[lbDesc.LoadBalancerName].instances); l > 0 {
+			lbDesc.Instances = make([]elb.Instance, l)
+			lb := srv.lbs[lbDesc.LoadBalancerName]
+			for i := 0; i < l; i++ {
+				lbDesc.Instances[i] = elb.Instance{
+					InstanceId: lb.instances[i],
+				}
+			}
+		}
 		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, lbDesc)
 	}
 	for name, _ := range srv.lbs {
@@ -433,7 +494,9 @@ func (srv *Server) RemoveInstance(instId string) {
 
 // Creates a fake load balancer in the fake server
 func (srv *Server) NewLoadBalancer(name string) {
-	srv.lbs[name] = fmt.Sprintf("%s-some-aws-stuff.sa-east-1.amazonaws.com", name)
+	srv.lbs[name] = lb{
+		dnsName: fmt.Sprintf("%s-some-aws-stuff.sa-east-1.amazonaws.com", name),
+	}
 }
 
 // Removes a fake load balancer from the fake server
