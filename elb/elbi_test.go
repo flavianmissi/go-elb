@@ -237,3 +237,71 @@ func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err, ErrorMatches, ".*i-foo.*(InvalidInstance).*")
 }
+
+func (s *ClientTests) TestConfigureHealthCheck(c *C) {
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	_, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+	}()
+	hc := elb.HealthCheck{
+		HealthyThreshold:   10,
+		Interval:           30,
+		Target:             "HTTP:80/",
+		Timeout:            5,
+		UnhealthyThreshold: 2,
+	}
+	resp, err := s.elb.ConfigureHealthCheck(createLBReq.Name, &hc)
+	c.Assert(err, IsNil)
+	c.Assert(resp.HealthCheck.HealthyThreshold, Equals, 10)
+	c.Assert(resp.HealthCheck.Interval, Equals, 30)
+	c.Assert(resp.HealthCheck.Target, Equals, "HTTP:80/")
+	c.Assert(resp.HealthCheck.Timeout, Equals, 5)
+	c.Assert(resp.HealthCheck.UnhealthyThreshold, Equals, 2)
+}
+
+func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *C) {
+	createLBReq := elb.CreateLoadBalancer{
+		Name:       "testlb",
+		AvailZones: []string{"us-east-1a"},
+		Listeners: []elb.Listener{
+			{
+				InstancePort:     80,
+				InstanceProtocol: "http",
+				LoadBalancerPort: 80,
+				Protocol:         "http",
+			},
+		},
+	}
+	_, err := s.elb.CreateLoadBalancer(&createLBReq)
+	c.Assert(err, IsNil)
+	defer func() {
+		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
+		c.Check(err, IsNil)
+	}()
+	hc := elb.HealthCheck{
+		HealthyThreshold:   10,
+		Interval:           30,
+		Target:             "HTTP:80",
+		Timeout:            5,
+		UnhealthyThreshold: 2,
+	}
+	resp, err := s.elb.ConfigureHealthCheck(createLBReq.Name, &hc)
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	expected := "HealthCheck HTTP Target must specify a port followed by a path that begins with a slash. e.g. HTTP:80/ping/this/path (ValidationError)"
+	c.Assert(err.Error(), Equals, expected)
+}

@@ -175,3 +175,31 @@ var DescribeInstanceHealthBadRequest = `
     <RequestId>352e00d6-566c-11e2-a46d-313272bbb522</RequestId>
 </ErrorResponse>
 `
+
+var ConfigureHealthCheck = `
+<ConfigureHealthCheckResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <ConfigureHealthCheckResult>
+        <HealthCheck>
+            <Interval>30</Interval>
+            <Target>HTTP:80/</Target>
+            <HealthyThreshold>10</HealthyThreshold>
+            <Timeout>5</Timeout>
+            <UnhealthyThreshold>2</UnhealthyThreshold>
+        </HealthCheck>
+    </ConfigureHealthCheckResult>
+    <ResponseMetadata>
+    <RequestId>a882d12c-5694-11e2-b647-594652c9487c</RequestId>
+    </ResponseMetadata>
+</ConfigureHealthCheckResponse>
+`
+
+var ConfigureHealthCheckBadRequest = `
+<ErrorResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/">
+    <Error>
+        <Type>Sender</Type>
+        <Code>LoadBalancerNotFound</Code>
+        <Message>There is no ACTIVE Load Balancer named 'foolb'</Message>
+    </Error>
+    <RequestId>2d9fe4a5-5697-11e2-9415-e325c02171d7</RequestId>
+</ErrorResponse>
+`

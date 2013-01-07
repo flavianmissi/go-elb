@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,33 +191,6 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 	}
 	var resp elb.DescribeLoadBalancerResp
 	for name, value := range srv.lbsReqs {
-		ht := 10
-		timeout := 5
-		ut := 2
-		interval := 30
-		target := "TCP:80"
-		if v := value.Get("HealthCheck.HealthyThreshold"); v != "" {
-			ht, _ = strconv.Atoi(v)
-		}
-		if v := value.Get("HealthCheck.Timeout"); v != "" {
-			timeout, _ = strconv.Atoi(v)
-		}
-		if v := value.Get("HealthCheck.UnhealthyThreshold"); v != "" {
-			ut, _ = strconv.Atoi(v)
-		}
-		if v := value.Get("HealthCheck.Interval"); v != "" {
-			interval, _ = strconv.Atoi(v)
-		}
-		if v := value.Get("HealthCheck.Target"); v != "" {
-			target = v
-		}
-		hc := elb.HealthCheck{
-			HealthyThreshold:   ht,
-			Interval:           interval,
-			Target:             target,
-			Timeout:            timeout,
-			UnhealthyThreshold: ut,
-		}
 		lds := []elb.ListenerDescription{}
 		i := 1
 		protocol := value.Get(fmt.Sprintf("Listeners.member.%d.Protocol", i))
@@ -236,23 +210,13 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 			protocol = value.Get(fmt.Sprintf("Listeners.member.%d.Protocol", i))
 			lds = append(lds, lDescription)
 		}
-		ssgGName := "amazon-elb-sg"
-		ssgOAlias := "amazon-elb"
-		if v := value.Get("SourceSecurityGroup.GroupName"); v != "" {
-			ssgGName = v
-		}
-		if v := value.Get("SourceSecurityGroup.OwnerAlias"); v != "" {
-			ssgOAlias = v
-		}
+		sourceSecGroup := srv.makeSourceSecGroup(&value)
 		lbDesc := elb.LoadBalancerDescription{
 			AvailZones:           []string{value.Get("AvailabilityZones.member.1")},
 			LoadBalancerName:     name,
-			HealthCheck:          hc,
+			HealthCheck:          srv.makeHealthCheck(&value),
 			ListenerDescriptions: lds,
-			SourceSecurityGroup: elb.SourceSecurityGroup{
-				GroupName:  ssgGName,
-				OwnerAlias: ssgOAlias,
-			},
+			SourceSecurityGroup:  sourceSecGroup,
 		}
 		if value.Get("Scheme") == "" {
 			lbDesc.Scheme = "internet-facing"
@@ -261,7 +225,60 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 		lbDesc.DNSName = srv.lbs[lbDesc.LoadBalancerName]
 		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, lbDesc)
 	}
+	for name, _ := range srv.lbs {
+		desc := elb.LoadBalancerDescription{
+			AvailZones:       []string{"us-east-1a"},
+			LoadBalancerName: name,
+			HealthCheck:      srv.makeHealthCheck(&url.Values{}),
+		}
+		resp.LoadBalancerDescriptions = append(resp.LoadBalancerDescriptions, desc)
+	}
 	return resp, nil
+}
+
+func (srv *Server) makeHealthCheck(value *url.Values) elb.HealthCheck {
+	ht := 10
+	timeout := 5
+	ut := 2
+	interval := 30
+	target := "TCP:80"
+	if v := value.Get("HealthCheck.HealthyThreshold"); v != "" {
+		ht, _ = strconv.Atoi(v)
+	}
+	if v := value.Get("HealthCheck.Timeout"); v != "" {
+		timeout, _ = strconv.Atoi(v)
+	}
+	if v := value.Get("HealthCheck.UnhealthyThreshold"); v != "" {
+		ut, _ = strconv.Atoi(v)
+	}
+	if v := value.Get("HealthCheck.Interval"); v != "" {
+		interval, _ = strconv.Atoi(v)
+	}
+	if v := value.Get("HealthCheck.Target"); v != "" {
+		target = v
+	}
+	return elb.HealthCheck{
+		HealthyThreshold:   ht,
+		Interval:           interval,
+		Target:             target,
+		Timeout:            timeout,
+		UnhealthyThreshold: ut,
+	}
+}
+
+func (srv *Server) makeSourceSecGroup(value *url.Values) elb.SourceSecurityGroup {
+	name := "amazon-elb-sg"
+	alias := "amazon-elb"
+	if v := value.Get("SourceSecurityGroup.GroupName"); v != "" {
+		name = v
+	}
+	if v := value.Get("SourceSecurityGroup.OwnerAlias"); v != "" {
+		alias = v
+	}
+	return elb.SourceSecurityGroup{
+		GroupName:  name,
+		OwnerAlias: alias,
+	}
 }
 
 func (srv *Server) describeInstanceHealth(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
@@ -288,6 +305,45 @@ func (srv *Server) describeInstanceHealth(w http.ResponseWriter, req *http.Reque
 		instanceId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
 	return resp, nil
+}
+
+func (srv *Server) configureHealthCheck(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
+	required := []string{
+		"LoadBalancerName",
+		"HealthCheck.HealthyThreshold",
+		"HealthCheck.Interval",
+		"HealthCheck.Target",
+		"HealthCheck.Timeout",
+		"HealthCheck.UnhealthyThreshold",
+	}
+	if err := srv.validate(req, required); err != nil {
+		return nil, err
+	}
+	target := req.FormValue("HealthCheck.Target")
+	r, err := regexp.Compile(`[\w]+:[\d]+\/+`)
+	if err != nil {
+		panic(err)
+	}
+	if m := r.FindStringSubmatch(target); m == nil {
+		return nil, &elb.Error{
+			StatusCode: 400,
+			Code:       "ValidationError",
+			Message:    "HealthCheck HTTP Target must specify a port followed by a path that begins with a slash. e.g. HTTP:80/ping/this/path",
+		}
+	}
+	ht, _ := strconv.Atoi(req.FormValue("HealthCheck.HealthyThreshold"))
+	interval, _ := strconv.Atoi(req.FormValue("HealthCheck.Interval"))
+	timeout, _ := strconv.Atoi(req.FormValue("HealthCheck.Timeout"))
+	ut, _ := strconv.Atoi(req.FormValue("HealthCheck.UnhealthyThreshold"))
+	return elb.HealthCheckResp{
+		HealthCheck: &elb.HealthCheck{
+			HealthyThreshold:   ht,
+			Interval:           interval,
+			Target:             target,
+			Timeout:            timeout,
+			UnhealthyThreshold: ut,
+		},
+	}, nil
 }
 
 func (srv *Server) instanceExists(id string) error {
@@ -393,4 +449,5 @@ var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, strin
 	"DeregisterInstancesFromLoadBalancer": (*Server).deregisterInstancesFromLoadBalancer,
 	"DescribeLoadBalancers":               (*Server).describeLoadBalancers,
 	"DescribeInstanceHealth":              (*Server).describeInstanceHealth,
+	"ConfigureHealthCheck":                (*Server).configureHealthCheck,
 }

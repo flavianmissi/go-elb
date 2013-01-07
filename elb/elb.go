@@ -244,6 +244,30 @@ func (elb *ELB) DescribeInstanceHealth(lbName string, instanceIds ...string) (*D
 	return resp, nil
 }
 
+type HealthCheckResp struct {
+	HealthCheck *HealthCheck `xml:"ConfigureHealthCheckResult>HealthCheck"`
+}
+
+// Configure health check for a LB
+//
+// See http://goo.gl/2HE6a for more information
+func (elb *ELB) ConfigureHealthCheck(lbName string, healthCheck *HealthCheck) (*HealthCheckResp, error) {
+	params := map[string]string{
+		"Action":                         "ConfigureHealthCheck",
+		"LoadBalancerName":               lbName,
+		"HealthCheck.HealthyThreshold":   strconv.Itoa(healthCheck.HealthyThreshold),
+		"HealthCheck.Interval":           strconv.Itoa(healthCheck.Interval),
+		"HealthCheck.Target":             healthCheck.Target,
+		"HealthCheck.Timeout":            strconv.Itoa(healthCheck.Timeout),
+		"HealthCheck.UnhealthyThreshold": strconv.Itoa(healthCheck.UnhealthyThreshold),
+	}
+	resp := new(HealthCheckResp)
+	if err := elb.query(params, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (elb *ELB) query(params map[string]string, resp interface{}) error {
 	params["Version"] = "2012-06-01"
 	params["Timestamp"] = time.Now().In(time.UTC).Format(time.RFC3339)

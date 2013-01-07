@@ -160,3 +160,11 @@ func (s *LocalServerSuite) TestDescribeInstanceHealth(c *C) {
 func (s *LocalServerSuite) TestDescribeInstanceHealthBadRequest(c *C) {
 	s.clientTests.TestDescribeInstanceHealthBadRequest(c)
 }
+
+func (s *LocalServerSuite) TestConfigureHealthCheck(c *C) {
+	s.clientTests.TestConfigureHealthCheck(c)
+}
+
+func (s *LocalServerSuite) TestConfigureHealthCheckBadRequest(c *C) {
+	s.clientTests.TestConfigureHealthCheckBadRequest(c)
+}

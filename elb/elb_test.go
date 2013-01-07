@@ -269,3 +269,47 @@ func (s *S) TestDescribeInstanceHealthBadRequest(c *C) {
 	c.Assert(resp, IsNil)
 	c.Assert(err, ErrorMatches, ".*i-foooo.*(InvalidInstance).*")
 }
+
+func (s *S) TestConfigureHealthCheck(c *C) {
+	testServer.PrepareResponse(200, nil, ConfigureHealthCheck)
+	hc := elb.HealthCheck{
+		HealthyThreshold:   10,
+		Interval:           30,
+		Target:             "HTTP:80/",
+		Timeout:            5,
+		UnhealthyThreshold: 2,
+	}
+	resp, err := s.elb.ConfigureHealthCheck("testlb", &hc)
+	c.Assert(err, IsNil)
+	values := testServer.WaitRequest().URL.Query()
+	c.Assert(values.Get("Version"), Equals, "2012-06-01")
+	c.Assert(values.Get("Signature"), Not(Equals), "")
+	c.Assert(values.Get("Timestamp"), Not(Equals), "")
+	c.Assert(values.Get("Action"), Equals, "ConfigureHealthCheck")
+	c.Assert(values.Get("LoadBalancerName"), Equals, "testlb")
+	c.Assert(values.Get("HealthCheck.HealthyThreshold"), Equals, "10")
+	c.Assert(values.Get("HealthCheck.Interval"), Equals, "30")
+	c.Assert(values.Get("HealthCheck.Target"), Equals, "HTTP:80/")
+	c.Assert(values.Get("HealthCheck.Timeout"), Equals, "5")
+	c.Assert(values.Get("HealthCheck.UnhealthyThreshold"), Equals, "2")
+	c.Assert(resp.HealthCheck.HealthyThreshold, Equals, 10)
+	c.Assert(resp.HealthCheck.Interval, Equals, 30)
+	c.Assert(resp.HealthCheck.Target, Equals, "HTTP:80/")
+	c.Assert(resp.HealthCheck.Timeout, Equals, 5)
+	c.Assert(resp.HealthCheck.UnhealthyThreshold, Equals, 2)
+}
+
+func (s *S) TestConfigureHealthCheckBadRequest(c *C) {
+	testServer.PrepareResponse(400, nil, ConfigureHealthCheckBadRequest)
+	hc := elb.HealthCheck{
+		HealthyThreshold:   10,
+		Interval:           30,
+		Target:             "HTTP:80/",
+		Timeout:            5,
+		UnhealthyThreshold: 2,
+	}
+	resp, err := s.elb.ConfigureHealthCheck("foolb", &hc)
+	c.Assert(resp, IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(err, ErrorMatches, ".*foolb.*(LoadBalancerNotFound).*")
+}
