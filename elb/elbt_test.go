@@ -93,6 +93,25 @@ func (s *LocalServerSuite) TestDescribeLoadBalancerListsAddedByNewLoadbalancerFu
 	c.Assert(isPresent, Equals, true)
 }
 
+func (s *LocalServerSuite) TestDescribeLoadBalancerListsInstancesAddedByRegisterInstancesFunc(c *C) {
+	srv := s.srv.srv
+	lbName := "somelb"
+	srv.NewLoadBalancer(lbName)
+	defer srv.RemoveLoadBalancer(lbName)
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.RegisterInstance(instId, lbName) // no need to deregister, since we're removing the lb
+	resp, err := s.clientTests.elb.DescribeLoadBalancers()
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.LoadBalancerDescriptions) > 0, Equals, true)
+	c.Assert(len(resp.LoadBalancerDescriptions[0].Instances) > 0, Equals, true)
+	c.Assert(resp.LoadBalancerDescriptions[0].Instances, DeepEquals, []elb.Instance{{InstanceId: instId}})
+	srv.DeregisterInstance(instId, lbName)
+	resp, err = s.clientTests.elb.DescribeLoadBalancers()
+	c.Assert(err, IsNil)
+	c.Assert(resp.LoadBalancerDescriptions[0].Instances, DeepEquals, []elb.Instance(nil))
+}
+
 func (s *LocalServerSuite) TestDescribeLoadBalancersBadRequest(c *C) {
 	s.clientTests.TestDescribeLoadBalancersBadRequest(c)
 }

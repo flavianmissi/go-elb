@@ -484,6 +484,22 @@ func (srv *Server) RemoveLoadBalancer(name string) {
 	delete(srv.lbs, name)
 }
 
+// Register a fake instance with a fake Load Balancer
+//
+// If the Load Balancer does not exists it does nothing
+func (srv *Server) RegisterInstance(instId, lbName string) {
+	lb, ok := srv.lbs[lbName]
+	if !ok {
+		fmt.Println("lb not found :/")
+		return
+	}
+	lb.Instances = append(lb.Instances, elb.Instance{InstanceId: instId})
+}
+
+func (srv *Server) DeregisterInstance(instId, lbName string) {
+	removeInstanceFromLB(srv.lbs[lbName], instId)
+}
+
 var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, string) (interface{}, error){
 	"CreateLoadBalancer":                  (*Server).createLoadBalancer,
 	"DeleteLoadBalancer":                  (*Server).deleteLoadBalancer,
