@@ -78,6 +78,21 @@ func (s *LocalServerSuite) TestDescribeLoadBalancer(c *C) {
 	s.clientTests.TestDescribeLoadBalancers(c)
 }
 
+func (s *LocalServerSuite) TestDescribeLoadBalancerListsAddedByNewLoadbalancerFunc(c *C) {
+	srv := s.srv.srv
+	srv.NewLoadBalancer("wierdlb")
+	defer srv.RemoveLoadBalancer("wierdlb")
+	resp, err := s.clientTests.elb.DescribeLoadBalancers()
+	c.Assert(err, IsNil)
+	isPresent := false
+	for _, desc := range resp.LoadBalancerDescriptions {
+		if desc.LoadBalancerName == "wierdlb" {
+			isPresent = true
+		}
+	}
+	c.Assert(isPresent, Equals, true)
+}
+
 func (s *LocalServerSuite) TestDescribeLoadBalancersBadRequest(c *C) {
 	s.clientTests.TestDescribeLoadBalancersBadRequest(c)
 }
