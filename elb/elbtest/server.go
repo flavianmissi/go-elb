@@ -328,6 +328,17 @@ func (srv *Server) describeInstanceHealth(w http.ResponseWriter, req *http.Reque
 	resp := elb.DescribeInstanceHealthResp{
 		InstanceStates: []elb.InstanceState{},
 	}
+	for _, lbDesc := range srv.lbs {
+		for _, instance := range lbDesc.Instances {
+			is := elb.InstanceState{
+				Description: "Instance is in pending state.",
+				InstanceId:  instance.InstanceId,
+				State:       "OutOfService",
+				ReasonCode:  "Instance",
+			}
+			resp.InstanceStates = append(resp.InstanceStates, is)
+		}
+	}
 	i := 1
 	instanceId := req.FormValue("Instances.member.1.InstanceId")
 	for instanceId != "" {

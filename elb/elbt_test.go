@@ -195,6 +195,22 @@ func (s *LocalServerSuite) TestDescribeInstanceHealthBadRequest(c *C) {
 	s.clientTests.TestDescribeInstanceHealthBadRequest(c)
 }
 
+func (s *LocalServerSuite) TestDescribeInstanceHealthWithoutSpecifyingInstances(c *C) {
+	srv := s.srv.srv
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.NewLoadBalancer("testlb")
+	defer srv.RemoveLoadBalancer("testlb")
+	srv.RegisterInstance(instId, "testlb")
+	resp, err := s.clientTests.elb.DescribeInstanceHealth("testlb")
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.InstanceStates) > 0, Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, Equals, "Instance is in pending state.")
+	c.Assert(resp.InstanceStates[0].InstanceId, Equals, instId)
+	c.Assert(resp.InstanceStates[0].State, Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "Instance")
+}
+
 func (s *LocalServerSuite) TestConfigureHealthCheck(c *C) {
 	s.clientTests.TestConfigureHealthCheck(c)
 }
