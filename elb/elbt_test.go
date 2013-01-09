@@ -211,6 +211,29 @@ func (s *LocalServerSuite) TestDescribeInstanceHealthWithoutSpecifyingInstances(
 	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "Instance")
 }
 
+func (s *LocalServerSuite) TestDescribeInstanceHealthChangingIt(c *C) {
+	srv := s.srv.srv
+	instId := srv.NewInstance()
+	defer srv.RemoveInstance(instId)
+	srv.NewLoadBalancer("somelb")
+	defer srv.RemoveLoadBalancer("somelb")
+	srv.RegisterInstance(instId, "somelb")
+	state := elb.InstanceState{
+		Description: "Instance has failed at least the UnhealthyThreshold number of health checks consecutively",
+		InstanceId:  instId,
+		State:       "OutOfService",
+		ReasonCode:  "Instance",
+	}
+	srv.ChangeInstanceState("somelb", state)
+	resp, err := s.clientTests.elb.DescribeInstanceHealth("somelb")
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.InstanceStates) > 0, Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, Equals, "Instance has failed at least the UnhealthyThreshold number of health checks consecutively")
+	c.Assert(resp.InstanceStates[0].InstanceId, Equals, instId)
+	c.Assert(resp.InstanceStates[0].State, Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, Equals, "Instance")
+}
+
 func (s *LocalServerSuite) TestConfigureHealthCheck(c *C) {
 	s.clientTests.TestConfigureHealthCheck(c)
 }

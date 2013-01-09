@@ -18,14 +18,15 @@ import (
 
 // Server implements an ELB simulator for use in testing.
 type Server struct {
-	url       string
-	listener  net.Listener
-	mutex     sync.Mutex
-	reqId     int
-	lbs       map[string]*elb.LoadBalancerDescription
-	lbsReqs   map[string]url.Values
-	instances []string
-	instCount int
+	url            string
+	listener       net.Listener
+	mutex          sync.Mutex
+	reqId          int
+	lbs            map[string]*elb.LoadBalancerDescription
+	lbsReqs        map[string]url.Values
+	instances      []string
+	instanceStates map[string][]*elb.InstanceState
+	instCount      int
 }
 
 // Starts and returns a new server
@@ -35,9 +36,10 @@ func NewServer() (*Server, error) {
 		return nil, fmt.Errorf("cannot listen on localhost: %v", err)
 	}
 	srv := &Server{
-		listener: l,
-		url:      "http://" + l.Addr().String(),
-		lbs:      make(map[string]*elb.LoadBalancerDescription),
+		listener:       l,
+		url:            "http://" + l.Addr().String(),
+		lbs:            make(map[string]*elb.LoadBalancerDescription),
+		instanceStates: make(map[string][]*elb.InstanceState),
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		srv.serveHTTP(w, req)
@@ -155,6 +157,7 @@ func (srv *Server) registerInstancesWithLoadBalancer(w http.ResponseWriter, req 
 		i++
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
+	srv.instanceStates[lbName] = append(srv.instanceStates[lbName], srv.makeInstanceState(instId))
 	srv.lbs[lbName].Instances = append(srv.lbs[lbName].Instances, instances...)
 	return elb.RegisterInstancesResp{InstanceIds: instIds}, nil
 }
@@ -164,11 +167,12 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 	if err := srv.validate(req, required); err != nil {
 		return nil, err
 	}
-	if err := srv.lbExists(req.FormValue("LoadBalancerName")); err != nil {
+	lbName := req.FormValue("LoadBalancerName")
+	if err := srv.lbExists(lbName); err != nil {
 		return nil, err
 	}
 	i := 1
-	lb := srv.lbs[req.FormValue("LoadBalancerName")]
+	lb := srv.lbs[lbName]
 	instId := req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	for instId != "" {
 		if err := srv.instanceExists(instId); err != nil {
@@ -178,7 +182,8 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 		removeInstanceFromLB(lb, instId)
 		instId = req.FormValue(fmt.Sprintf("Instances.member.%d.InstanceId", i))
 	}
-	srv.lbs[req.FormValue("LoadBalancerName")] = lb
+	srv.lbs[lbName] = lb
+	srv.removeInstanceStatesFromLoadBalancer(lbName, instId)
 	return elb.SimpleResp{RequestId: reqId}, nil
 }
 
@@ -225,6 +230,15 @@ func (srv *Server) getParameters(prefix string, values url.Values) []string {
 	return result
 }
 
+func (srv *Server) makeInstanceState(id string) *elb.InstanceState {
+	return &elb.InstanceState{
+		Description: "Instance is in pending state.",
+		InstanceId:  id,
+		State:       "OutOfService",
+		ReasonCode:  "Instance",
+	}
+}
+
 func removeInstanceFromLB(lb *elb.LoadBalancerDescription, id string) {
 	index := -1
 	for i, instance := range lb.Instances {
@@ -236,6 +250,17 @@ func removeInstanceFromLB(lb *elb.LoadBalancerDescription, id string) {
 	if index > -1 {
 		copy(lb.Instances[index:], lb.Instances[index+1:])
 		lb.Instances = lb.Instances[:len(lb.Instances)-1]
+	}
+}
+
+func (srv *Server) removeInstanceStatesFromLoadBalancer(lb, id string) {
+	for i, state := range srv.instanceStates[lb] {
+		if state.InstanceId == id {
+			a := srv.instanceStates[lb]
+			a[i], a = a[len(a)-1], a[:len(a)-1]
+			srv.instanceStates[lb] = a
+			return
+		}
 	}
 }
 
@@ -328,16 +353,8 @@ func (srv *Server) describeInstanceHealth(w http.ResponseWriter, req *http.Reque
 	resp := elb.DescribeInstanceHealthResp{
 		InstanceStates: []elb.InstanceState{},
 	}
-	for _, lbDesc := range srv.lbs {
-		for _, instance := range lbDesc.Instances {
-			is := elb.InstanceState{
-				Description: "Instance is in pending state.",
-				InstanceId:  instance.InstanceId,
-				State:       "OutOfService",
-				ReasonCode:  "Instance",
-			}
-			resp.InstanceStates = append(resp.InstanceStates, is)
-		}
+	for _, state := range srv.instanceStates[req.FormValue("LoadBalancerName")] {
+		resp.InstanceStates = append(resp.InstanceStates, *state)
 	}
 	i := 1
 	instanceId := req.FormValue("Instances.member.1.InstanceId")
@@ -505,10 +522,22 @@ func (srv *Server) RegisterInstance(instId, lbName string) {
 		return
 	}
 	lb.Instances = append(lb.Instances, elb.Instance{InstanceId: instId})
+	srv.instanceStates[lbName] = append(srv.instanceStates[lbName], srv.makeInstanceState(instId))
 }
 
 func (srv *Server) DeregisterInstance(instId, lbName string) {
 	removeInstanceFromLB(srv.lbs[lbName], instId)
+	srv.removeInstanceStatesFromLoadBalancer(lbName, instId)
+}
+
+func (srv *Server) ChangeInstanceState(lb string, state elb.InstanceState) {
+	states := srv.instanceStates[lb]
+	for i, s := range states {
+		if s.InstanceId == state.InstanceId {
+			srv.instanceStates[lb][i] = &state
+			return
+		}
+	}
 }
 
 var actions = map[string]func(*Server, http.ResponseWriter, *http.Request, string) (interface{}, error){
