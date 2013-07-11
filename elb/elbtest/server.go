@@ -189,6 +189,7 @@ func (srv *Server) deregisterInstancesFromLoadBalancer(w http.ResponseWriter, re
 
 func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Request, reqId string) (interface{}, error) {
 	i := 1
+	var lbsDesc []elb.LoadBalancerDescription
 	lbName := req.FormValue(fmt.Sprintf("LoadBalancerNames.member.%d", i))
 	for lbName != "" {
 		key := fmt.Sprintf("LoadBalancerNames.member.%d", i)
@@ -197,14 +198,16 @@ func (srv *Server) describeLoadBalancers(w http.ResponseWriter, req *http.Reques
 				return nil, err
 			}
 		}
+		if lbName != "" {
+			lbsDesc = append(lbsDesc, *srv.lbs[lbName])
+		}
 		i++
 		lbName = req.FormValue(fmt.Sprintf("LoadBalancerNames.member.%d", i))
 	}
-	lbsDesc := make([]elb.LoadBalancerDescription, len(srv.lbs))
-	i = 0
-	for _, lb := range srv.lbs {
-		lbsDesc[i] = *lb
-		i++
+	if lbsDesc == nil {
+		for _, lb := range srv.lbs {
+			lbsDesc = append(lbsDesc, *lb)
+		}
 	}
 	resp := elb.DescribeLoadBalancerResp{
 		LoadBalancerDescriptions: lbsDesc,
